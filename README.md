@@ -29,25 +29,39 @@ A Model Context Protocol (MCP) server that provides access to the [MyDisease.inf
 - **KEGG**: Disease pathways
 - **UniProt**: Protein-disease associations
 
-## Installation
+## Quick Start
 
-```bash
-git clone https://github.com/yourusername/mydisease-mcp
-cd mydisease-mcp
-mamba env create -f environment.yml
-mamba activate mydisease-mcp
-```
+1. **Install UV**
+   ```bash
+   curl -LsSf https://astral.sh/uv/install.sh | sh
+   ```
+
+2. **Setup**
+   ```bash
+   git clone https://github.com/nickzren/mydisease-mcp
+   cd mydisease-mcp
+   uv venv
+   source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+   uv pip install -e .
+   ```
+
+3. **Configure Claude Desktop**
+   ```bash
+   python scripts/configure_claude.py
+   ```
+   Then restart Claude Desktop.
 
 ## Usage
 
-### As an MCP Server
+### Running the Server
 
 ```bash
 mydisease-mcp
 ```
 
-### Configure with Claude Desktop
+### Development
 
 ```bash
-python scripts/configure_claude.py
+# Run tests
+pytest tests/ -v
 ```
