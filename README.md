@@ -38,7 +38,6 @@ A Model Context Protocol (MCP) server that provides access to the [MyDisease.inf
 
 2. **Setup**
    ```bash
-   git clone https://github.com/nickzren/mydisease-mcp
    cd mydisease-mcp
    uv venv
    source .venv/bin/activate  # On Windows: .venv\Scripts\activate
