@@ -1,15 +1,7 @@
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
-
 [project]
 name = "mydisease-mcp"
 version = "0.1.0"
-description = "MCP server providing comprehensive access to MyDisease.info API for disease information"
-readme = "README.md"
 requires-python = ">=3.12"
-license = {text = "MIT"}
-authors = [{name = "Zhong Ren", email = "zhong.ren@hotmail.com"}]
 dependencies = [
     "mcp",
     "httpx",
@@ -18,11 +10,12 @@ dependencies = [
     "pytest-asyncio",
 ]
 
-[project.scripts]
-mydisease-mcp = "mydisease_mcp.server:main"
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
 
-[tool.hatch.build.targets.wheel]
-packages = ["src/mydisease_mcp"]
+[tool.setuptools.packages.find]
+where = ["src"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

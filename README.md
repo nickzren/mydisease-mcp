@@ -52,9 +52,7 @@ pip install mcpm
 ### 3. Setup the MCP Server
 ```bash
 cd mydisease-mcp
-uv venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-uv pip install -e .
+uv sync
 ```
 
 ### 4. Add the Server to Claude Desktop
@@ -65,18 +63,9 @@ cd mydisease-mcp
 # Set Claude as the target client
 mcpm target set @claude-desktop
 
-# Get the full Python path from your virtual environment
-# On macOS/Linux:
-source .venv/bin/activate
-PYTHON_PATH=$(which python)
-
-# On Windows (PowerShell):
-# .venv\Scripts\activate
-# $PYTHON_PATH = (Get-Command python).Path
-
 # Add the MyDisease MCP server
 mcpm import stdio mydisease \
-  --command "$PYTHON_PATH" \
+  --command "$(uv run which python)" \
   --args "-m mydisease_mcp.server"
 ```
 Then restart Claude Desktop.
@@ -86,12 +75,12 @@ Then restart Claude Desktop.
 ### Running the Server
 
 ```bash
-mydisease-mcp
+uv run python -m mydisease_mcp.server
 ```
 
 ### Development
 
 ```bash
 # Run tests
-pytest tests/ -v
+uv run pytest tests/ -v
 ```

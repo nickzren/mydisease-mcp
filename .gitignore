@@ -57,3 +57,4 @@ Thumbs.db
 # Project specific
 *.log
 .env
+uv.lock
