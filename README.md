@@ -78,6 +78,16 @@ Then restart Claude Desktop.
 uv run python -m mydisease_mcp.server
 ```
 
+You can choose a specific transport when starting the FastMCP server:
+
+```bash
+uv run python -m mydisease_mcp.server --transport stdio        # default (Claude Desktop)
+uv run python -m mydisease_mcp.server --transport sse --host 0.0.0.0 --port 8000
+uv run python -m mydisease_mcp.server --transport http --host 0.0.0.0 --port 8000
+```
+
+When running with `--transport sse` or `--transport http`, the server exposes a discovery document at `/.well-known/mcp.json` and a health check at `/`.
+
 ### Development
 
 ```bash

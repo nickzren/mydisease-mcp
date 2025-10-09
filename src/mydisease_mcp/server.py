@@ -1,235 +1,303 @@
-"""MyDisease MCP Server implementation."""
+"""FastMCP-backed server for MyDisease MCP tools."""
+from __future__ import annotations
 
-import asyncio
-import json
-from typing import Any, Dict, Optional
+import anyio
+import functools
+import inspect
 import logging
+import os
+from contextlib import asynccontextmanager
+from typing import Any, Callable, Dict, Optional, Tuple
 
-from mcp.server import Server
-from mcp.server.stdio import stdio_server
-import mcp.types as types
+import mcp.types as mcp_types
+from fastmcp import FastMCP
+from mcp.server.lowlevel.server import NotificationOptions
+from starlette.requests import Request
+from starlette.responses import JSONResponse, Response
 
+from . import __version__ as package_version
 from .client import MyDiseaseClient
 from .tools import (
-    QUERY_TOOLS, QueryApi,
-    ANNOTATION_TOOLS, AnnotationApi,
-    BATCH_TOOLS, BatchApi,
-    GENE_ASSOCIATION_TOOLS, GeneAssociationApi,
-    VARIANT_TOOLS, VariantApi,
-    PHENOTYPE_TOOLS, PhenotypeApi,
-    CLINICAL_TOOLS, ClinicalApi,
-    ONTOLOGY_TOOLS, OntologyApi,
-    GWAS_TOOLS, GWASApi,
-    PATHWAY_TOOLS, PathwayApi,
-    DRUG_TOOLS, DrugApi,
-    EPIDEMIOLOGY_TOOLS, EpidemiologyApi,
-    EXPORT_TOOLS, ExportApi,
-    MAPPING_TOOLS, MappingApi,
-    METADATA_TOOLS, MetadataApi
+    AnnotationApi,
+    BatchApi,
+    ClinicalApi,
+    DrugApi,
+    EpidemiologyApi,
+    ExportApi,
+    GeneAssociationApi,
+    GWASApi,
+    MappingApi,
+    MetadataApi,
+    OntologyApi,
+    PathwayApi,
+    PhenotypeApi,
+    QueryApi,
+    VariantApi,
 )
 
-logger = logging.getLogger(__name__)
+__all__ = [
+    "mcp",
+    "get_client",
+    "main",
+]
+
 logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# Combine all tools
-ALL_TOOLS = (
-    QUERY_TOOLS +
-    ANNOTATION_TOOLS +
-    BATCH_TOOLS +
-    GENE_ASSOCIATION_TOOLS +
-    VARIANT_TOOLS +
-    PHENOTYPE_TOOLS +
-    CLINICAL_TOOLS +
-    ONTOLOGY_TOOLS +
-    GWAS_TOOLS +
-    PATHWAY_TOOLS +
-    DRUG_TOOLS +
-    EPIDEMIOLOGY_TOOLS +
-    EXPORT_TOOLS +
-    MAPPING_TOOLS +
-    METADATA_TOOLS
-)
-
-# Create API class mapping
-API_CLASS_MAP = {
-    # Query tools
-    "search_disease": QueryApi,
-    "search_by_field": QueryApi,
-    "get_field_statistics": QueryApi,
-    "search_by_phenotype": QueryApi,
-    "build_complex_query": QueryApi,
-    # Annotation tools
-    "get_disease_by_id": AnnotationApi,
-    # Batch tools
-    "batch_query_diseases": BatchApi,
-    "batch_get_diseases": BatchApi,
-    # Gene association tools
-    "get_diseases_by_gene": GeneAssociationApi,
-    "get_disease_genes": GeneAssociationApi,
-    "search_by_gene_panel": GeneAssociationApi,
-    "get_gene_disease_score": GeneAssociationApi,
-    # Variant tools
-    "get_diseases_by_variant": VariantApi,
-    "get_disease_variants": VariantApi,
-    "get_variant_pathogenicity": VariantApi,
-    "search_by_variant_type": VariantApi,
-    # Phenotype tools
-    "get_disease_phenotypes": PhenotypeApi,
-    "search_by_hpo_term": PhenotypeApi,
-    "get_phenotype_similarity": PhenotypeApi,
-    "get_phenotype_frequency": PhenotypeApi,
-    # Clinical tools
-    "get_clinical_significance": ClinicalApi,
-    "get_diagnostic_criteria": ClinicalApi,
-    "get_disease_prognosis": ClinicalApi,
-    "get_treatment_options": ClinicalApi,
-    "get_clinical_trials": ClinicalApi,
-    # Ontology tools
-    "get_disease_ontology": OntologyApi,
-    "get_disease_classification": OntologyApi,
-    "get_related_diseases": OntologyApi,
-    "navigate_disease_hierarchy": OntologyApi,
-    # GWAS tools
-    "get_gwas_associations": GWASApi,
-    "search_gwas_by_trait": GWASApi,
-    "get_gwas_variants": GWASApi,
-    "get_gwas_statistics": GWASApi,
-    # Pathway tools
-    "get_disease_pathways": PathwayApi,
-    "search_diseases_by_pathway": PathwayApi,
-    "get_pathway_genes": PathwayApi,
-    "get_pathway_enrichment": PathwayApi,
-    # Drug tools
-    "get_disease_drugs": DrugApi,
-    "search_drugs_by_indication": DrugApi,
-    "get_drug_targets": DrugApi,
-    "get_pharmacogenomics": DrugApi,
-    # Epidemiology tools
-    "get_disease_prevalence": EpidemiologyApi,
-    "get_disease_incidence": EpidemiologyApi,
-    "get_demographic_data": EpidemiologyApi,
-    "get_geographic_distribution": EpidemiologyApi,
-    # Export tools
-    "export_disease_list": ExportApi,
-    "export_disease_comparison": ExportApi,
-    "export_gene_disease_matrix": ExportApi,
-    "export_phenotype_profile": ExportApi,
-    # Mapping tools
-    "map_disease_ids": MappingApi,
-    "validate_disease_ids": MappingApi,
-    "find_common_diseases": MappingApi,
-    # Metadata tools
-    "get_mydisease_metadata": MetadataApi,
-    "get_available_fields": MetadataApi,
-    "get_database_statistics": MetadataApi
-}
+_client: Optional[MyDiseaseClient] = None
+_client_config: Dict[str, Any] = {}
 
 
-class MyDiseaseMcpServer:
-    """MCP Server for MyDisease.info data."""
-    
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
-        self.server_name = "mydisease-mcp"
-        self.server_version = "0.1.0"
-        self.config = config or {}
-        self.mcp_server = Server(self.server_name, self.server_version)
-        
-        # Initialize client with configuration
-        self.client = MyDiseaseClient(
-            timeout=self.config.get("timeout", 30.0),
-            cache_enabled=self.config.get("cache_enabled", True),
-            cache_ttl=self.config.get("cache_ttl", 3600),
-            rate_limit=self.config.get("rate_limit", 10)
-        )
-        
-        self._api_instances: Dict[type, Any] = {}
-        self._setup_handlers()
-        logger.info(f"{self.server_name} v{self.server_version} initialized.")
-    
-    def _setup_handlers(self):
-        """Register MCP handlers."""
-        
-        @self.mcp_server.list_tools()
-        async def handle_list_tools() -> list[types.Tool]:
-            """Returns the list of all available tools."""
-            logger.info(f"Listing {len(ALL_TOOLS)} available tools")
-            return ALL_TOOLS
-        
-        @self.mcp_server.call_tool()
-        async def handle_call_tool(
-            name: str, arguments: Dict[str, Any]
-        ) -> list[types.TextContent]:
-            """Handles a tool call request."""
-            logger.info(f"Handling call for tool: '{name}' with args: {list(arguments.keys())}")
-            
-            try:
-                if name not in API_CLASS_MAP:
-                    raise ValueError(f"Unknown tool: {name}")
-                
-                api_class = API_CLASS_MAP[name]
-                
-                if api_class not in self._api_instances:
-                    self._api_instances[api_class] = api_class()
-                
-                api_instance = self._api_instances[api_class]
-                
-                if not hasattr(api_instance, name):
-                    raise ValueError(f"Tool method '{name}' not found")
-                
-                func_to_call = getattr(api_instance, name)
-                result_data = await func_to_call(self.client, **arguments)
-                
-                # Handle export tools that return strings directly
-                if isinstance(result_data, str):
-                    return [types.TextContent(type="text", text=result_data)]
-                
-                result_json = json.dumps(result_data, indent=2)
-                return [types.TextContent(type="text", text=result_json)]
-            
-            except Exception as e:
-                logger.error(f"Error calling tool '{name}': {str(e)}", exc_info=True)
-                error_response = {
-                    "error": type(e).__name__,
-                    "message": str(e),
-                    "tool_name": name
-                }
-                return [types.TextContent(type="text", text=json.dumps(error_response, indent=2))]
-    
-    async def run(self):
-        """Starts the MCP server."""
-        logger.info(f"Starting {self.server_name} v{self.server_version}...")
-        logger.info(f"Configuration: cache_enabled={self.config.get('cache_enabled', True)}, "
-                   f"rate_limit={self.config.get('rate_limit', 10)}/s")
-        
-        async with stdio_server() as (read_stream, write_stream):
-            await self.mcp_server.run(
-                read_stream, 
-                write_stream,
-                self.mcp_server.create_initialization_options()
-            )
+def _bool_from_env(value: str, default: bool) -> bool:
+    try:
+        return value.lower() in {"1", "true", "yes", "on"}
+    except AttributeError:
+        return default
 
 
-def main():
-    """Main entry point with optional configuration."""
-    import os
-    
-    # Load configuration from environment variables
-    config = {
-        "cache_enabled": os.environ.get("MYDISEASE_CACHE_ENABLED", "true").lower() == "true",
+def _load_client_config() -> Dict[str, Any]:
+    return {
+        "base_url": os.environ.get("MYDISEASE_BASE_URL", "https://mydisease.info/v1"),
+        "cache_enabled": _bool_from_env(os.environ.get("MYDISEASE_CACHE_ENABLED", "true"), True),
         "cache_ttl": int(os.environ.get("MYDISEASE_CACHE_TTL", "3600")),
         "rate_limit": int(os.environ.get("MYDISEASE_RATE_LIMIT", "10")),
-        "timeout": float(os.environ.get("MYDISEASE_TIMEOUT", "30.0"))
+        "timeout": float(os.environ.get("MYDISEASE_TIMEOUT", "30.0")),
     }
-    
-    server = MyDiseaseMcpServer(config)
+
+
+def get_client() -> MyDiseaseClient:
+    if _client is None:
+        raise RuntimeError(
+            "MyDiseaseClient not initialised. Tools must be called through the running MCP server."
+        )
+    return _client
+
+
+@asynccontextmanager
+async def lifespan(server: FastMCP):
+    global _client, _client_config
+
+    _client_config = _load_client_config()
+    logger.info(
+        "Starting MyDisease MCP server cache_enabled=%s cache_ttl=%s rate_limit=%s timeout=%s",
+        _client_config["cache_enabled"],
+        _client_config["cache_ttl"],
+        _client_config["rate_limit"],
+        _client_config["timeout"],
+    )
+
+    _client = MyDiseaseClient(
+        base_url=_client_config["base_url"],
+        timeout=_client_config["timeout"],
+        cache_enabled=_client_config["cache_enabled"],
+        cache_ttl=_client_config["cache_ttl"],
+        rate_limit=_client_config["rate_limit"],
+    )
+
     try:
-        asyncio.run(server.run())
-    except KeyboardInterrupt:
-        logger.info("Server interrupted by user.")
-    except Exception as e:
-        logger.error(f"Server error: {e}")
+        yield
+    finally:
+        if _client is not None:
+            await _client.close()
+            _client = None
+            logger.info("MyDisease MCP server shut down cleanly")
+
+
+mcp = FastMCP(
+    name="mydisease-mcp",
+    version=package_version,
+    lifespan=lifespan,
+)
+
+_query_api = QueryApi()
+_annotation_api = AnnotationApi()
+_batch_api = BatchApi()
+_gene_association_api = GeneAssociationApi()
+_variant_api = VariantApi()
+_phenotype_api = PhenotypeApi()
+_clinical_api = ClinicalApi()
+_ontology_api = OntologyApi()
+_gwas_api = GWASApi()
+_pathway_api = PathwayApi()
+_drug_api = DrugApi()
+_epidemiology_api = EpidemiologyApi()
+_export_api = ExportApi()
+_mapping_api = MappingApi()
+_metadata_api = MetadataApi()
+
+
+def _make_tool_wrapper(method: Callable[..., Any]) -> Callable[..., Any]:
+    @functools.wraps(method)
+    async def wrapper(*args: Any, **kwargs: Any) -> Any:
+        client = get_client()
+        return await method(client, *args, **kwargs)
+
+    signature = inspect.signature(method)
+    params = list(signature.parameters.values())[1:]
+    wrapper.__signature__ = signature.replace(parameters=params)  # type: ignore[attr-defined]
+    return wrapper
+
+
+def register_all_api_methods() -> None:
+    api_instances: Tuple[Any, ...] = (
+        _query_api,
+        _annotation_api,
+        _batch_api,
+        _gene_association_api,
+        _variant_api,
+        _phenotype_api,
+        _clinical_api,
+        _ontology_api,
+        _gwas_api,
+        _pathway_api,
+        _drug_api,
+        _epidemiology_api,
+        _export_api,
+        _mapping_api,
+        _metadata_api,
+    )
+
+    for api in api_instances:
+        for name in dir(api):
+            if name.startswith("_"):
+                continue
+            method = getattr(api, name)
+            if not inspect.iscoroutinefunction(method):
+                continue
+            if name in getattr(mcp._tool_manager, "_tools", {}):
+                logger.debug("Tool already registered: %s", name)
+                continue
+            wrapper = _make_tool_wrapper(method)
+            mcp.tool(name=name)(wrapper)
+            logger.debug("Registered tool: %s", name)
+
+
+register_all_api_methods()
+
+
+def __getattr__(name: str) -> Any:  # pragma: no cover - guidance only
+    if name == "ALL_TOOLS":
+        raise AttributeError(
+            "ALL_TOOLS has been removed in v0.3.0. Use FastMCP list_tools instead."
+        )
+    if name == "API_CLASS_MAP":
+        raise AttributeError(
+            "API_CLASS_MAP has been removed in v0.3.0. Tool dispatch is handled by FastMCP."
+        )
+    raise AttributeError(name)
+
+
+@mcp.custom_route("/.well-known/mcp.json", methods=["GET"], include_in_schema=False)
+async def discovery_endpoint(request: Request) -> JSONResponse:
+    base_url = str(request.base_url).rstrip("/")
+    sse_path = mcp._deprecated_settings.sse_path.lstrip("/")
+    message_path = mcp._deprecated_settings.message_path.lstrip("/")
+    http_path = mcp._deprecated_settings.streamable_http_path.lstrip("/")
+
+    capabilities = mcp._mcp_server.get_capabilities(
+        NotificationOptions(),
+        experimental_capabilities={}
+    )
+
+    transports: Dict[str, Dict[str, str]] = {
+        "sse": {
+            "url": f"{base_url}/{sse_path}",
+            "messageUrl": f"{base_url}/{message_path}",
+        }
+    }
+
+    transports["http"] = {
+        "url": f"{base_url}/{http_path}",
+    }
+
+    discovery = {
+        "protocolVersion": mcp_types.LATEST_PROTOCOL_VERSION,
+        "server": {
+            "name": mcp._mcp_server.name,
+            "version": mcp._mcp_server.version,
+            "instructions": mcp._mcp_server.instructions,
+        },
+        "capabilities": capabilities.model_dump(mode="json"),
+        "transports": transports,
+    }
+
+    return JSONResponse(discovery)
+
+
+@mcp.custom_route("/", methods=["GET"], include_in_schema=False)
+async def root_health(_: Request) -> JSONResponse:
+    return JSONResponse({"status": "ok"})
+
+
+@mcp.custom_route(mcp._deprecated_settings.sse_path, methods=["POST"], include_in_schema=False)
+async def sse_message_fallback(_: Request) -> Response:
+    return Response(status_code=204)
+
+
+def main() -> None:
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="MyDisease MCP Server",
+        epilog="Environment overrides: MCP_TRANSPORT, FASTMCP_SERVER_HOST, FASTMCP_SERVER_PORT",
+    )
+    parser.add_argument(
+        "--transport",
+        choices=["stdio", "sse", "http"],
+        default=os.getenv("MCP_TRANSPORT", "stdio"),
+        help="Transport protocol to expose (stdio, sse, or http)",
+    )
+    parser.add_argument(
+        "--host",
+        default=os.getenv("FASTMCP_SERVER_HOST", "0.0.0.0"),
+        help="Host for SSE transport (default: 0.0.0.0)",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=int(os.getenv("FASTMCP_SERVER_PORT", "8000")),
+        help="Port for SSE transport (default: 8000)",
+    )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Enable verbose (DEBUG level) logging",
+    )
+
+    args = parser.parse_args()
+
+    if args.verbose:
+        logging.getLogger().setLevel(logging.DEBUG)
+
+    if args.transport in {"sse", "http"}:
+        os.environ["FASTMCP_SERVER_HOST"] = args.host
+        os.environ["FASTMCP_SERVER_PORT"] = str(args.port)
+        if hasattr(mcp, "settings"):
+            mcp.settings.host = args.host  # type: ignore[attr-defined]
+            mcp.settings.port = args.port  # type: ignore[attr-defined]
+        logger.info("Configured %s host=%s port=%s", args.transport.upper(), args.host, args.port)
+
+    logger.info(
+        "Starting MyDisease MCP server (transport=%s, host=%s, port=%s)",
+        args.transport,
+        args.host,
+        args.port,
+    )
+
+    try:
+        if args.transport == "http":
+            async def run_http() -> None:
+                await mcp.run_http_async(host=args.host, port=args.port)
+
+            anyio.run(run_http)
+        else:
+            mcp.run(transport=args.transport)
+    except KeyboardInterrupt:  # pragma: no cover - user interaction
+        logger.info("Server interrupted by user")
+    except Exception:  # pragma: no cover - unexpected runtime failure
+        logger.exception("Server encountered an unrecoverable error")
         raise
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     main()
