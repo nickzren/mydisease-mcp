@@ -51,6 +51,32 @@ class TestPhenotypeTools:
         assert result["hpo_term"] == "HP:0001250"
         assert result["total_diseases"] == 1
         assert result["diseases"][0]["phenotype_matches"][0]["hpo_id"] == "HP:0001250"
+
+    @pytest.mark.asyncio
+    async def test_search_by_hpo_term_matches_hpo_list(self, mock_client):
+        """Test HPO list payload matching."""
+        mock_client.get.return_value = {
+            "hits": [
+                {
+                    "_id": "disease1",
+                    "name": "Disease 1",
+                    "hpo": [
+                        {"hpo_id": "HP:0001250", "phenotype_name": "Seizures"},
+                        {"hpo_id": "HP:0001252", "phenotype_name": "Hypotonia"},
+                    ],
+                }
+            ]
+        }
+
+        api = PhenotypeApi()
+        result = await api.search_by_hpo_term(
+            mock_client,
+            hpo_id="HP:0001250"
+        )
+
+        assert result["success"] is True
+        assert result["total_diseases"] == 1
+        assert result["diseases"][0]["phenotype_matches"][0]["hpo_id"] == "HP:0001250"
     
     @pytest.mark.asyncio
     async def test_get_phenotype_similarity(self, mock_client):

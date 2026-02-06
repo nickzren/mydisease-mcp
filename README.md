@@ -1,4 +1,9 @@
 # MyDisease MCP Server
+[![CI](https://github.com/nickzren/mydisease-mcp/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/nickzren/mydisease-mcp/actions/workflows/ci.yml)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/downloads/)
+[![FastMCP 2.14.5](https://img.shields.io/badge/FastMCP-2.14.5-4B32C3)](https://github.com/jlowin/fastmcp)
+[![MCP Compatible](https://img.shields.io/badge/MCP-Compatible-0A7B83)](https://modelcontextprotocol.io/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 A Model Context Protocol (MCP) server that provides access to the [MyDisease.info API](https://mydisease.info/).
 
@@ -92,5 +97,5 @@ When running with `--transport sse` or `--transport http`, the server exposes a 
 
 ```bash
 # Run tests
-uv run pytest tests/ -v
+uv run --extra test pytest tests/ -v
 ```

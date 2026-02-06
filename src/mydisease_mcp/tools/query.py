@@ -3,6 +3,11 @@
 from typing import Any, Dict, Optional, List
 import mcp.types as types
 from ..client import MyDiseaseClient
+from ._query_utils import (
+    maybe_quote_field_value,
+    quote_lucene_phrase,
+    validate_lucene_field_name,
+)
 
 
 class QueryApi:
@@ -54,9 +59,9 @@ class QueryApi:
         """Search by specific fields with boolean operators."""
         query_parts = []
         for field, value in field_queries.items():
-            if " " in value and not (value.startswith('"') and value.endswith('"')):
-                value = f'"{value}"'
-            query_parts.append(f"{field}:{value}")
+            query_parts.append(
+                f"{validate_lucene_field_name(field)}:{maybe_quote_field_value(str(value))}"
+            )
         
         q = f" {operator} ".join(query_parts)
         
@@ -74,21 +79,22 @@ class QueryApi:
         size: int = 100
     ) -> Dict[str, Any]:
         """Get statistics for a specific field."""
+        field_name = validate_lucene_field_name(field)
         params = {
             "q": "*",
-            "facets": field,
+            "facets": field_name,
             "facet_size": size,
             "size": 0
         }
         
         result = await client.get("query", params=params)
         
-        facet_data = result.get("facets", {}).get(field, {})
+        facet_data = result.get("facets", {}).get(field_name, {})
         terms = facet_data.get("terms", [])
         
         return {
             "success": True,
-            "field": field,
+            "field": field_name,
             "total_unique_values": facet_data.get("total", 0),
             "top_values": [
                 {
@@ -113,7 +119,10 @@ class QueryApi:
         # Build query for phenotypes
         phenotype_queries = []
         for phenotype in phenotypes:
-            phenotype_queries.append(f'hpo.phenotype_name:"{phenotype}" OR phenotype_related_to_disease.hpo_phenotype:"{phenotype}"')
+            escaped = quote_lucene_phrase(phenotype)
+            phenotype_queries.append(
+                f"hpo.phenotype_name:{escaped} OR phenotype_related_to_disease.hpo_phenotype:{escaped}"
+            )
         
         operator = " AND " if match_all else " OR "
         q = operator.join([f"({pq})" for pq in phenotype_queries])
@@ -130,6 +139,7 @@ class QueryApi:
         client: MyDiseaseClient,
         criteria: List[Dict[str, Any]],
         logic: str = "AND",
+        allow_raw_text: bool = False,
         fields: Optional[str] = "_id,name,mondo,orphanet,omim,disgenet",
         size: Optional[int] = 10
     ) -> Dict[str, Any]:
@@ -140,25 +150,40 @@ class QueryApi:
             criterion_type = criterion.get("type")
             
             if criterion_type == "field":
-                field = criterion["field"]
+                field = validate_lucene_field_name(criterion["field"])
                 value = criterion["value"]
-                if " " in str(value) and not (str(value).startswith('"') and str(value).endswith('"')):
-                    value = f'"{value}"'
-                query_parts.append(f"{field}:{value}")
+                query_parts.append(f"{field}:{maybe_quote_field_value(str(value))}")
             
             elif criterion_type == "range":
-                field = criterion["field"]
+                field = validate_lucene_field_name(criterion["field"])
                 min_val = criterion.get("min", "*")
                 max_val = criterion.get("max", "*")
-                query_parts.append(f"{field}:[{min_val} TO {max_val}]")
+
+                def _format_range_bound(value: Any) -> str:
+                    if value == "*":
+                        return "*"
+                    if isinstance(value, (int, float)):
+                        return str(value)
+                    text = str(value)
+                    numeric_text = text.replace(".", "", 1).replace("-", "", 1)
+                    if numeric_text.isdigit():
+                        return text
+                    return quote_lucene_phrase(text)
+
+                query_parts.append(
+                    f"{field}:[{_format_range_bound(min_val)} TO {_format_range_bound(max_val)}]"
+                )
             
             elif criterion_type == "exists":
-                field = criterion["field"]
+                field = validate_lucene_field_name(criterion["field"])
                 query_parts.append(f"_exists_:{field}")
             
             elif criterion_type == "text":
-                value = criterion["value"]
-                query_parts.append(value)
+                value = str(criterion["value"])
+                if allow_raw_text:
+                    query_parts.append(value)
+                else:
+                    query_parts.append(quote_lucene_phrase(value))
             
             else:
                 raise ValueError(f"Unknown criterion type: {criterion_type}")
@@ -335,6 +360,11 @@ QUERY_TOOLS = [
                     "description": "Logic operator",
                     "default": "AND",
                     "enum": ["AND", "OR"]
+                },
+                "allow_raw_text": {
+                    "type": "boolean",
+                    "description": "Allow raw Lucene text criteria without escaping",
+                    "default": False
                 },
                 "fields": {
                     "type": "string",

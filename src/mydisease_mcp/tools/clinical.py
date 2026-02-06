@@ -164,7 +164,7 @@ class ClinicalApi:
             drugs = drugs if isinstance(drugs, list) else [drugs]
             
             for drug in drugs:
-                if not include_experimental or drug.get("status") != "experimental":
+                if include_experimental or drug.get("status") != "experimental":
                     treatment_data["drug_treatments"].append(drug)
         
         if "gene_therapy" in result:
@@ -293,9 +293,14 @@ CLINICAL_TOOLS = [
                     "description": "Disease ID"
                 },
                 "status": {
-                    "type": "string",
                     "description": "Trial status filter",
-                    "enum": ["recruiting", "active", "completed", "terminated", None]
+                    "anyOf": [
+                        {
+                            "type": "string",
+                            "enum": ["recruiting", "active", "completed", "terminated"]
+                        },
+                        {"type": "null"}
+                    ]
                 }
             },
             "required": ["disease_id"]

@@ -3,6 +3,7 @@
 from typing import Any, Dict, Optional, List
 import mcp.types as types
 from ..client import MyDiseaseClient
+from ._query_utils import quote_lucene_phrase
 
 
 class GWASApi:
@@ -85,10 +86,10 @@ class GWASApi:
         size: int = 20
     ) -> Dict[str, Any]:
         """Search GWAS studies by trait."""
-        query_parts = [f'gwas_catalog.trait:"{trait}"']
+        query_parts = [f"gwas_catalog.trait:{quote_lucene_phrase(trait)}"]
         
         if ancestry:
-            query_parts.append(f'gwas_catalog.ancestry:"{ancestry}"')
+            query_parts.append(f"gwas_catalog.ancestry:{quote_lucene_phrase(ancestry)}")
         
         q = " AND ".join(query_parts)
         

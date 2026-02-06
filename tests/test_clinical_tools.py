@@ -85,6 +85,48 @@ class TestClinicalTools:
         assert result["success"] is True
         assert len(result["treatment_options"]["standard_treatments"]) == 1
         assert len(result["treatment_options"]["drug_treatments"]) == 1
+
+    @pytest.mark.asyncio
+    async def test_get_treatment_options_excludes_experimental_by_default(self, mock_client):
+        """Test experimental treatment filtering default behavior."""
+        mock_client.get.return_value = {
+            "drug_treatment": [
+                {"name": "Drug A", "status": "approved"},
+                {"name": "Drug B", "status": "experimental"},
+            ]
+        }
+
+        api = ClinicalApi()
+        result = await api.get_treatment_options(
+            mock_client,
+            disease_id="test-id",
+            include_experimental=False
+        )
+
+        assert result["success"] is True
+        names = [drug["name"] for drug in result["treatment_options"]["drug_treatments"]]
+        assert names == ["Drug A"]
+
+    @pytest.mark.asyncio
+    async def test_get_treatment_options_includes_experimental_when_enabled(self, mock_client):
+        """Test experimental treatment filtering opt-in behavior."""
+        mock_client.get.return_value = {
+            "drug_treatment": [
+                {"name": "Drug A", "status": "approved"},
+                {"name": "Drug B", "status": "experimental"},
+            ]
+        }
+
+        api = ClinicalApi()
+        result = await api.get_treatment_options(
+            mock_client,
+            disease_id="test-id",
+            include_experimental=True
+        )
+
+        assert result["success"] is True
+        names = [drug["name"] for drug in result["treatment_options"]["drug_treatments"]]
+        assert names == ["Drug A", "Drug B"]
     
     @pytest.mark.asyncio
     async def test_get_clinical_trials(self, mock_client):

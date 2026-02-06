@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import anyio
+import fastmcp
 import functools
 import inspect
 import logging
@@ -11,7 +12,6 @@ from typing import Any, Callable, Dict, Optional, Tuple
 
 import mcp.types as mcp_types
 from fastmcp import FastMCP
-from mcp.server.lowlevel.server import NotificationOptions
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
@@ -60,6 +60,7 @@ def _load_client_config() -> Dict[str, Any]:
         "base_url": os.environ.get("MYDISEASE_BASE_URL", "https://mydisease.info/v1"),
         "cache_enabled": _bool_from_env(os.environ.get("MYDISEASE_CACHE_ENABLED", "true"), True),
         "cache_ttl": int(os.environ.get("MYDISEASE_CACHE_TTL", "3600")),
+        "cache_max_entries": int(os.environ.get("MYDISEASE_CACHE_MAX_ENTRIES", "1000")),
         "rate_limit": int(os.environ.get("MYDISEASE_RATE_LIMIT", "10")),
         "timeout": float(os.environ.get("MYDISEASE_TIMEOUT", "30.0")),
     }
@@ -79,9 +80,10 @@ async def lifespan(server: FastMCP):
 
     _client_config = _load_client_config()
     logger.info(
-        "Starting MyDisease MCP server cache_enabled=%s cache_ttl=%s rate_limit=%s timeout=%s",
+        "Starting MyDisease MCP server cache_enabled=%s cache_ttl=%s cache_max_entries=%s rate_limit=%s timeout=%s",
         _client_config["cache_enabled"],
         _client_config["cache_ttl"],
+        _client_config["cache_max_entries"],
         _client_config["rate_limit"],
         _client_config["timeout"],
     )
@@ -91,6 +93,7 @@ async def lifespan(server: FastMCP):
         timeout=_client_config["timeout"],
         cache_enabled=_client_config["cache_enabled"],
         cache_ttl=_client_config["cache_ttl"],
+        cache_max_entries=_client_config["cache_max_entries"],
         rate_limit=_client_config["rate_limit"],
     )
 
@@ -138,6 +141,10 @@ def _make_tool_wrapper(method: Callable[..., Any]) -> Callable[..., Any]:
     return wrapper
 
 
+def _discovery_capabilities() -> Dict[str, Any]:
+    return {"tools": {"listChanged": False}}
+
+
 def register_all_api_methods() -> None:
     api_instances: Tuple[Any, ...] = (
         _query_api,
@@ -157,6 +164,8 @@ def register_all_api_methods() -> None:
         _metadata_api,
     )
 
+    registered_tools: set[str] = set()
+
     for api in api_instances:
         for name in dir(api):
             if name.startswith("_"):
@@ -164,11 +173,12 @@ def register_all_api_methods() -> None:
             method = getattr(api, name)
             if not inspect.iscoroutinefunction(method):
                 continue
-            if name in getattr(mcp._tool_manager, "_tools", {}):
+            if name in registered_tools:
                 logger.debug("Tool already registered: %s", name)
                 continue
             wrapper = _make_tool_wrapper(method)
             mcp.tool(name=name)(wrapper)
+            registered_tools.add(name)
             logger.debug("Registered tool: %s", name)
 
 
@@ -190,14 +200,9 @@ def __getattr__(name: str) -> Any:  # pragma: no cover - guidance only
 @mcp.custom_route("/.well-known/mcp.json", methods=["GET"], include_in_schema=False)
 async def discovery_endpoint(request: Request) -> JSONResponse:
     base_url = str(request.base_url).rstrip("/")
-    sse_path = mcp._deprecated_settings.sse_path.lstrip("/")
-    message_path = mcp._deprecated_settings.message_path.lstrip("/")
-    http_path = mcp._deprecated_settings.streamable_http_path.lstrip("/")
-
-    capabilities = mcp._mcp_server.get_capabilities(
-        NotificationOptions(),
-        experimental_capabilities={}
-    )
+    sse_path = fastmcp.settings.sse_path.lstrip("/")
+    message_path = fastmcp.settings.message_path.lstrip("/")
+    http_path = fastmcp.settings.streamable_http_path.lstrip("/")
 
     transports: Dict[str, Dict[str, str]] = {
         "sse": {
@@ -213,11 +218,11 @@ async def discovery_endpoint(request: Request) -> JSONResponse:
     discovery = {
         "protocolVersion": mcp_types.LATEST_PROTOCOL_VERSION,
         "server": {
-            "name": mcp._mcp_server.name,
-            "version": mcp._mcp_server.version,
-            "instructions": mcp._mcp_server.instructions,
+            "name": mcp.name,
+            "version": mcp.version,
+            "instructions": mcp.instructions,
         },
-        "capabilities": capabilities.model_dump(mode="json"),
+        "capabilities": _discovery_capabilities(),
         "transports": transports,
     }
 
@@ -229,7 +234,7 @@ async def root_health(_: Request) -> JSONResponse:
     return JSONResponse({"status": "ok"})
 
 
-@mcp.custom_route(mcp._deprecated_settings.sse_path, methods=["POST"], include_in_schema=False)
+@mcp.custom_route(fastmcp.settings.sse_path, methods=["POST"], include_in_schema=False)
 async def sse_message_fallback(_: Request) -> Response:
     return Response(status_code=204)
 
@@ -272,9 +277,8 @@ def main() -> None:
     if args.transport in {"sse", "http"}:
         os.environ["FASTMCP_SERVER_HOST"] = args.host
         os.environ["FASTMCP_SERVER_PORT"] = str(args.port)
-        if hasattr(mcp, "settings"):
-            mcp.settings.host = args.host  # type: ignore[attr-defined]
-            mcp.settings.port = args.port  # type: ignore[attr-defined]
+        fastmcp.settings.host = args.host
+        fastmcp.settings.port = args.port
         logger.info("Configured %s host=%s port=%s", args.transport.upper(), args.host, args.port)
 
     logger.info(

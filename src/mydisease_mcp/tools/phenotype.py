@@ -3,6 +3,7 @@
 from typing import Any, Dict, Optional, List
 import mcp.types as types
 from ..client import MyDiseaseClient
+from ._query_utils import quote_lucene_phrase
 
 
 class PhenotypeApi:
@@ -68,10 +69,14 @@ class PhenotypeApi:
     ) -> Dict[str, Any]:
         """Search diseases by HPO term."""
         # Build query
+        hpo_term = quote_lucene_phrase(hpo_id)
         if hpo_id.startswith("HP:"):
-            q = f'hpo.hpo_id:"{hpo_id}" OR phenotype_related_to_disease.hpo_id:"{hpo_id}"'
+            q = f"hpo.hpo_id:{hpo_term} OR phenotype_related_to_disease.hpo_id:{hpo_term}"
         else:
-            q = f'hpo.phenotype_name:"{hpo_id}" OR phenotype_related_to_disease.hpo_phenotype:"{hpo_id}"'
+            q = (
+                f"hpo.phenotype_name:{hpo_term} "
+                f"OR phenotype_related_to_disease.hpo_phenotype:{hpo_term}"
+            )
         
         params = {
             "q": q,
@@ -99,6 +104,14 @@ class PhenotypeApi:
                         "hpo_id": hpo_id,
                         "match_type": "exact"
                     })
+                elif isinstance(hpo, list):
+                    for item in hpo:
+                        if item.get("hpo_id") == hpo_id or item.get("phenotype_name") == hpo_id:
+                            disease_info["phenotype_matches"].append({
+                                "source": "hpo",
+                                "hpo_id": item.get("hpo_id"),
+                                "match_type": "exact"
+                            })
             
             # Check phenotype relations
             if "phenotype_related_to_disease" in hit:
@@ -136,12 +149,15 @@ class PhenotypeApi:
         # First, search for diseases with any of the phenotypes
         phenotype_queries = []
         for phenotype in phenotype_list:
+            phenotype_term = quote_lucene_phrase(phenotype)
             if phenotype.startswith("HP:"):
-                phenotype_queries.append(f'hpo.hpo_id:"{phenotype}"')
-                phenotype_queries.append(f'phenotype_related_to_disease.hpo_id:"{phenotype}"')
+                phenotype_queries.append(f"hpo.hpo_id:{phenotype_term}")
+                phenotype_queries.append(f"phenotype_related_to_disease.hpo_id:{phenotype_term}")
             else:
-                phenotype_queries.append(f'hpo.phenotype_name:"{phenotype}"')
-                phenotype_queries.append(f'phenotype_related_to_disease.hpo_phenotype:"{phenotype}"')
+                phenotype_queries.append(f"hpo.phenotype_name:{phenotype_term}")
+                phenotype_queries.append(
+                    f"phenotype_related_to_disease.hpo_phenotype:{phenotype_term}"
+                )
         
         q = " OR ".join(phenotype_queries)
         

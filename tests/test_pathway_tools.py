@@ -48,6 +48,32 @@ class TestPathwayTools:
         assert result["success"] is True
         assert result["total_diseases"] == 1
         assert result["diseases"][0]["pathway_associations"][0]["pathway_id"] == "hsa04110"
+
+    @pytest.mark.asyncio
+    async def test_search_diseases_by_wikipathway(self, mock_client):
+        """Test searching diseases by WikiPathways ID."""
+        mock_client.get.return_value = {
+            "hits": [
+                {
+                    "_id": "disease1",
+                    "name": "Disease 1",
+                    "wikipathways": {
+                        "id": "WP254",
+                        "name": "Pathway X"
+                    }
+                }
+            ]
+        }
+
+        api = PathwayApi()
+        result = await api.search_diseases_by_pathway(
+            mock_client,
+            pathway_id="WP254",
+        )
+
+        assert result["success"] is True
+        assert result["total_diseases"] == 1
+        assert result["diseases"][0]["pathway_associations"][0]["source"] == "wikipathways"
     
     @pytest.mark.asyncio
     async def test_get_pathway_genes(self, mock_client):

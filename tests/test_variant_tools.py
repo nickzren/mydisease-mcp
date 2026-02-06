@@ -30,6 +30,31 @@ class TestVariantTools:
         assert result["variant_id"] == "rs104894090"
         assert result["total_diseases"] == 1
         assert result["diseases"][0]["variant_associations"][0]["source"] == "clinvar"
+
+    @pytest.mark.asyncio
+    async def test_get_diseases_by_variant_handles_gwas_list(self, mock_client):
+        """Test GWAS list payloads do not crash variant lookup."""
+        mock_client.get.return_value = {
+            "hits": [
+                {
+                    "_id": "MONDO:0000001",
+                    "name": "Disease 1",
+                    "gwas_catalog": [
+                        {"rsid": "rs123", "p_value": "1e-9", "trait": "Trait A"}
+                    ],
+                }
+            ]
+        }
+
+        api = VariantApi()
+        result = await api.get_diseases_by_variant(
+            mock_client,
+            variant_id="rs123",
+        )
+
+        assert result["success"] is True
+        assert result["total_diseases"] == 1
+        assert result["diseases"][0]["variant_associations"][0]["source"] == "gwas"
     
     @pytest.mark.asyncio
     async def test_get_disease_variants(self, mock_client, sample_variant_data):

@@ -55,9 +55,34 @@ class TestQueryTools:
         assert result["success"] is True
         
         call_args = mock_client.get.call_args[1]["params"]["q"]
-        assert "mondo.mondo:MONDO:0007739" in call_args
+        assert "mondo.mondo:MONDO\\:0007739" in call_args
         assert 'inheritance.inheritance_type:"Autosomal dominant"' in call_args
         assert " AND " in call_args
+
+    @pytest.mark.asyncio
+    async def test_search_by_field_escapes_quotes(self, mock_client):
+        """Test query escaping for quoted user input."""
+        mock_client.get.return_value = {"total": 0, "hits": []}
+
+        api = QueryApi()
+        await api.search_by_field(
+            mock_client,
+            field_queries={"name": 'foo" OR *:*'},
+        )
+
+        call_args = mock_client.get.call_args[1]["params"]["q"]
+        assert 'name:"foo\\" OR *:*"' in call_args
+
+    @pytest.mark.asyncio
+    async def test_search_by_field_rejects_invalid_field_name(self, mock_client):
+        """Test dynamic field validation."""
+        api = QueryApi()
+
+        with pytest.raises(ValueError, match="Invalid field name"):
+            await api.search_by_field(
+                mock_client,
+                field_queries={'name OR *:*': "value"},
+            )
     
     @pytest.mark.asyncio
     async def test_search_by_phenotype(self, mock_client):
@@ -109,3 +134,32 @@ class TestQueryTools:
         assert len(result["top_values"]) == 3
         assert result["top_values"][0]["value"] == "Autosomal dominant"
         assert result["top_values"][0]["percentage"] == 40.0
+
+    @pytest.mark.asyncio
+    async def test_build_complex_query_text_is_escaped_by_default(self, mock_client):
+        """Text criterion should not pass raw Lucene by default."""
+        mock_client.get.return_value = {"total": 0, "hits": []}
+
+        api = QueryApi()
+        await api.build_complex_query(
+            mock_client,
+            criteria=[{"type": "text", "value": 'name:foo OR *:*'}],
+        )
+
+        q = mock_client.get.call_args[1]["params"]["q"]
+        assert q == '"name:foo OR *:*"'
+
+    @pytest.mark.asyncio
+    async def test_build_complex_query_text_allows_raw_opt_in(self, mock_client):
+        """Raw Lucene passthrough should require explicit opt-in."""
+        mock_client.get.return_value = {"total": 0, "hits": []}
+
+        api = QueryApi()
+        await api.build_complex_query(
+            mock_client,
+            criteria=[{"type": "text", "value": "name:foo OR *:*"}],
+            allow_raw_text=True,
+        )
+
+        q = mock_client.get.call_args[1]["params"]["q"]
+        assert q == "name:foo OR *:*"

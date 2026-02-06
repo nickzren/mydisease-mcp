@@ -3,6 +3,7 @@
 from typing import Any, Dict, Optional, List
 import mcp.types as types
 from ..client import MyDiseaseClient
+from ._query_utils import quote_lucene_phrase
 
 
 class DrugApi:
@@ -97,10 +98,13 @@ class DrugApi:
         size: int = 20
     ) -> Dict[str, Any]:
         """Search for drugs by disease indication."""
-        query_parts = [f'drug.indication:"{indication}" OR drug_treatment.indication:"{indication}"']
+        indication_term = quote_lucene_phrase(indication)
+        query_parts = [
+            f"drug.indication:{indication_term} OR drug_treatment.indication:{indication_term}"
+        ]
         
         if drug_status:
-            query_parts.append(f'drug.status:"{drug_status}"')
+            query_parts.append(f"drug.status:{quote_lucene_phrase(drug_status)}")
         
         q = " AND ".join(query_parts)
         
@@ -306,9 +310,14 @@ DRUG_TOOLS = [
                     "description": "Disease indication"
                 },
                 "drug_status": {
-                    "type": "string",
                     "description": "Drug approval status",
-                    "enum": ["approved", "experimental", "investigational", None]
+                    "anyOf": [
+                        {
+                            "type": "string",
+                            "enum": ["approved", "experimental", "investigational"]
+                        },
+                        {"type": "null"}
+                    ]
                 },
                 "size": {
                     "type": "integer",

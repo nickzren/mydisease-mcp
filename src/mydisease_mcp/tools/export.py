@@ -6,6 +6,7 @@ import csv
 import io
 import mcp.types as types
 from ..client import MyDiseaseClient
+from ._query_utils import quote_lucene_phrase
 
 
 class ExportApi:
@@ -265,7 +266,8 @@ class ExportApi:
             disease_set = set()
             
             for gene in gene_list:
-                q = f'gene.symbol:"{gene}" OR causal_gene.symbol:"{gene}"'
+                gene_term = quote_lucene_phrase(gene)
+                q = f"gene.symbol:{gene_term} OR causal_gene.symbol:{gene_term}"
                 params = {
                     "q": q,
                     "fields": "_id",

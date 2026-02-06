@@ -3,6 +3,7 @@
 from typing import Any, Dict, Optional, List
 import mcp.types as types
 from ..client import MyDiseaseClient
+from ._query_utils import quote_lucene_phrase
 
 
 class PathwayApi:
@@ -86,28 +87,30 @@ class PathwayApi:
     ) -> Dict[str, Any]:
         """Search diseases associated with a specific pathway."""
         query_parts = []
+        pathway_id_term = quote_lucene_phrase(pathway_id)
         
         # Build query based on pathway ID or name
         if pathway_id.startswith("hsa"):  # KEGG pathway
-            query_parts.append(f'kegg_pathway.id:"{pathway_id}"')
+            query_parts.append(f"kegg_pathway.id:{pathway_id_term}")
         elif pathway_id.startswith("R-"):  # Reactome
-            query_parts.append(f'reactome_pathway.id:"{pathway_id}"')
+            query_parts.append(f"reactome_pathway.id:{pathway_id_term}")
         elif pathway_id.startswith("WP"):  # WikiPathways
-            query_parts.append(f'wikipathways.id:"{pathway_id}"')
+            query_parts.append(f"wikipathways.id:{pathway_id_term}")
         else:
             # Generic pathway search
-            query_parts.append(f'pathway.id:"{pathway_id}"')
+            query_parts.append(f"pathway.id:{pathway_id_term}")
         
         if pathway_name:
-            query_parts.append(f'pathway.name:"{pathway_name}"')
-            query_parts.append(f'kegg_pathway.name:"{pathway_name}"')
-            query_parts.append(f'reactome_pathway.name:"{pathway_name}"')
+            pathway_name_term = quote_lucene_phrase(pathway_name)
+            query_parts.append(f"pathway.name:{pathway_name_term}")
+            query_parts.append(f"kegg_pathway.name:{pathway_name_term}")
+            query_parts.append(f"reactome_pathway.name:{pathway_name_term}")
         
         q = " OR ".join(query_parts)
         
         params = {
             "q": q,
-            "fields": "_id,name,pathway,kegg_pathway,reactome_pathway",
+            "fields": "_id,name,pathway,kegg_pathway,reactome_pathway,wikipathways",
             "size": size
         }
         
@@ -123,7 +126,7 @@ class PathwayApi:
             }
             
             # Check all pathway fields
-            for field in ["pathway", "kegg_pathway", "reactome_pathway"]:
+            for field in ["pathway", "kegg_pathway", "reactome_pathway", "wikipathways"]:
                 if field in hit:
                     pathways = hit[field]
                     pathways = pathways if isinstance(pathways, list) else [pathways]
@@ -224,7 +227,7 @@ class PathwayApi:
     ) -> Dict[str, Any]:
         """Find diseases with pathways enriched for given gene list."""
         # Search for diseases associated with these genes
-        gene_queries = [f'gene.symbol:"{gene}"' for gene in gene_list]
+        gene_queries = [f"gene.symbol:{quote_lucene_phrase(gene)}" for gene in gene_list]
         q = " OR ".join(gene_queries)
         
         params = {
@@ -323,9 +326,14 @@ PATHWAY_TOOLS = [
                     "description": "Disease ID"
                 },
                 "source": {
-                    "type": "string",
                     "description": "Pathway database source",
-                    "enum": ["kegg", "reactome", "wikipathways", None]
+                    "anyOf": [
+                        {
+                            "type": "string",
+                            "enum": ["kegg", "reactome", "wikipathways"]
+                        },
+                        {"type": "null"}
+                    ]
                 }
             },
             "required": ["disease_id"]

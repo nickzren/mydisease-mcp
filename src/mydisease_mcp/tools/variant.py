@@ -3,6 +3,7 @@
 from typing import Any, Dict, Optional, List
 import mcp.types as types
 from ..client import MyDiseaseClient
+from ._query_utils import quote_lucene_phrase
 
 
 class VariantApi:
@@ -19,15 +20,16 @@ class VariantApi:
         # Build query for variant
         # Variant ID could be rsID, HGVS notation, etc.
         query_parts = []
+        variant_term = quote_lucene_phrase(variant_id)
         
         if variant_id.startswith("rs"):
             # dbSNP rsID
-            query_parts.append(f'clinvar.variant.rsid:"{variant_id}"')
-            query_parts.append(f'gwas_catalog.rsid:"{variant_id}"')
+            query_parts.append(f"clinvar.variant.rsid:{variant_term}")
+            query_parts.append(f"gwas_catalog.rsid:{variant_term}")
         else:
             # HGVS or other notation
-            query_parts.append(f'clinvar.variant.hgvs:"{variant_id}"')
-            query_parts.append(f'pathogenic_variants.hgvs:"{variant_id}"')
+            query_parts.append(f"clinvar.variant.hgvs:{variant_term}")
+            query_parts.append(f"pathogenic_variants.hgvs:{variant_term}")
         
         q = " OR ".join(query_parts)
         
@@ -75,13 +77,17 @@ class VariantApi:
                         })
             
             # Extract GWAS catalog
-            if "gwas_catalog" in hit and hit["gwas_catalog"].get("rsid") == variant_id:
-                disease_info["variant_associations"].append({
-                    "source": "gwas",
-                    "variant_id": variant_id,
-                    "p_value": hit["gwas_catalog"].get("p_value"),
-                    "trait": hit["gwas_catalog"].get("trait")
-                })
+            if "gwas_catalog" in hit:
+                gwas_entries = hit["gwas_catalog"]
+                gwas_entries = gwas_entries if isinstance(gwas_entries, list) else [gwas_entries]
+                for gwas in gwas_entries:
+                    if gwas.get("rsid") == variant_id:
+                        disease_info["variant_associations"].append({
+                            "source": "gwas",
+                            "variant_id": variant_id,
+                            "p_value": gwas.get("p_value"),
+                            "trait": gwas.get("trait")
+                        })
             
             if disease_info["variant_associations"]:
                 diseases.append(disease_info)
@@ -154,10 +160,11 @@ class VariantApi:
     ) -> Dict[str, Any]:
         """Get pathogenicity information for a variant across diseases."""
         # Search for the variant
+        variant_term = quote_lucene_phrase(variant_id)
         if variant_id.startswith("rs"):
-            q = f'clinvar.variant.rsid:"{variant_id}"'
+            q = f"clinvar.variant.rsid:{variant_term}"
         else:
-            q = f'clinvar.variant.hgvs:"{variant_id}" OR pathogenic_variants.hgvs:"{variant_id}"'
+            q = f"clinvar.variant.hgvs:{variant_term} OR pathogenic_variants.hgvs:{variant_term}"
         
         params = {
             "q": q,
@@ -208,10 +215,10 @@ class VariantApi:
         size: int = 20
     ) -> Dict[str, Any]:
         """Search diseases by variant type (e.g., 'missense', 'deletion')."""
-        query_parts = [f'clinvar.variant.variant_type:"{variant_type}"']
+        query_parts = [f"clinvar.variant.variant_type:{quote_lucene_phrase(variant_type)}"]
         
         if gene_symbol:
-            query_parts.append(f'clinvar.variant.gene:"{gene_symbol}"')
+            query_parts.append(f"clinvar.variant.gene:{quote_lucene_phrase(gene_symbol)}")
         
         q = " AND ".join(query_parts)
         

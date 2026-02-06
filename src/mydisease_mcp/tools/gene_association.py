@@ -3,6 +3,7 @@
 from typing import Any, Dict, Optional, List
 import mcp.types as types
 from ..client import MyDiseaseClient
+from ._query_utils import quote_lucene_phrase, validate_lucene_field_name
 
 
 class GeneAssociationApi:
@@ -19,18 +20,19 @@ class GeneAssociationApi:
         """Get diseases associated with a specific gene."""
         # Build query for gene
         query_parts = []
+        gene_term = quote_lucene_phrase(gene_symbol)
         
         # Search in multiple gene fields
         gene_fields = [
-            f'gene.symbol:"{gene_symbol}"',
-            f'causal_gene.symbol:"{gene_symbol}"',
-            f'disgenet.gene.gene_name:"{gene_symbol}"',
-            f'ctd.gene_info.symbol:"{gene_symbol}"'
+            f"gene.symbol:{gene_term}",
+            f"causal_gene.symbol:{gene_term}",
+            f"disgenet.gene.gene_name:{gene_term}",
+            f"ctd.gene_info.symbol:{gene_term}",
         ]
         query_parts.append(f"({' OR '.join(gene_fields)})")
         
         if source:
-            query_parts.append(f'_exists_:{source}')
+            query_parts.append(f"_exists_:{validate_lucene_field_name(source)}")
         
         q = " AND ".join(query_parts)
         
@@ -168,8 +170,9 @@ class GeneAssociationApi:
         # Build query for gene panel
         gene_queries = []
         for gene in gene_symbols:
+            gene_term = quote_lucene_phrase(gene)
             gene_queries.append(
-                f'(gene.symbol:"{gene}" OR causal_gene.symbol:"{gene}" OR disgenet.gene.gene_name:"{gene}")'
+                f"(gene.symbol:{gene_term} OR causal_gene.symbol:{gene_term} OR disgenet.gene.gene_name:{gene_term})"
             )
         
         operator = " AND " if match_all else " OR "

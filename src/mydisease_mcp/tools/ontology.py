@@ -3,6 +3,7 @@
 from typing import Any, Dict, Optional, List
 import mcp.types as types
 from ..client import MyDiseaseClient
+from ._query_utils import quote_lucene_phrase
 
 
 class OntologyApi:
@@ -178,7 +179,7 @@ class OntologyApi:
                     parent_id = parent.get("id")
                     if parent_id:
                         # Find diseases with same parent
-                        q = f'mondo.parents.id:"{parent_id}"'
+                        q = f"mondo.parents.id:{quote_lucene_phrase(parent_id)}"
                         params = {
                             "q": q,
                             "fields": "_id,name,mondo",
@@ -204,7 +205,7 @@ class OntologyApi:
             gene_symbols = [g.get("symbol") for g in genes if g.get("symbol")][:5]  # Limit to 5 genes
             
             if gene_symbols:
-                gene_queries = [f'gene.symbol:"{symbol}"' for symbol in gene_symbols]
+                gene_queries = [f"gene.symbol:{quote_lucene_phrase(symbol)}" for symbol in gene_symbols]
                 q = " OR ".join(gene_queries)
                 
                 params = {
@@ -240,7 +241,10 @@ class OntologyApi:
             hpo_ids = [p.get("hpo_id") for p in phenotypes if p.get("hpo_id")][:5]
             
             if hpo_ids:
-                pheno_queries = [f'phenotype_related_to_disease.hpo_id:"{hpo}"' for hpo in hpo_ids]
+                pheno_queries = [
+                    f"phenotype_related_to_disease.hpo_id:{quote_lucene_phrase(hpo)}"
+                    for hpo in hpo_ids
+                ]
                 q = " OR ".join(pheno_queries)
                 
                 params = {
